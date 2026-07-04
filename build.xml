@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project name="token2-otp-applet" default="build" basedir=".">
+    <!-- Requires:
+         - lib/ant-javacard.jar  (https://github.com/martinpaljak/ant-javacard)
+         - a Java Card SDK, e.g. sdks/jc305u3_kit from
+           https://github.com/martinpaljak/oracle_javacard_sdks
+           (or set the JC_HOME environment variable)                      -->
+    <taskdef name="javacard"
+             classname="pro.javacard.ant.JavaCard"
+             classpath="lib/ant-javacard.jar"/>
+
+    <target name="build">
+        <javacard jckit="sdks/jc305u3_kit">
+            <cap output="token2-otp.cap"
+                 sources="src"
+                 aid="F00000014F7470"
+                 version="1.0">
+                <!-- Instance AID must be F00000014F747001 ("Otp\x01"),
+                     which is what the CLI's PC/SC transport SELECTs. -->
+                <applet class="t2otp.Token2OtpApplet"
+                        aid="F00000014F747001"/>
+            </cap>
+        </javacard>
+    </target>
+</project>
