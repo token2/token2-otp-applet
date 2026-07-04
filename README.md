@@ -30,7 +30,7 @@ target.
 
 ## Scope: which Token2 product line is this for?
 
-- **This is NOT for the standalone TOTP hardware tokens** — the classic
+- **This is NOT for the standalone TOTP hardware tokens** — the offline 
   programmable tokens with an LCD screen and a battery. Those run different
   firmware; refer to the
   [token2/openT2OTP](https://github.com/token2/openT2OTP) repository for
