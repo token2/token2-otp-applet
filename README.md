@@ -149,6 +149,33 @@ python3 app.py read_entry --app-name "Test app" --account-name "alice"
 python3 app.py erase_all
 ```
 
+## Host applications: other ways to use TOTP on these devices
+
+`token2-otp-cli` is the open-source reference implementation of the host
+side of the protocol, but it is not the only way to provision and read OTP
+profiles on these devices. The applet does not care which host application
+talks to it — all of the following speak the same on-device protocol:
+
+- **[Token2 Companion Apps](https://www.token2.com/companion)**
+  (proprietary) — our official applications, available on all platforms
+  (Windows desktop, Android, and iOS), managing OTP alongside FIDO2 and PIV
+  functionality of the same device.
+- **Token2 Companion – Rust edition (Keyroost)** (open source) — a
+  cross-platform desktop tool for Windows, macOS, and Linux built on the
+  independent open-source [keyroost](https://github.com/keyroost) Rust
+  toolchain, to which we contributed support for this OTP applet and the
+  Token2 PIN+ defaults.
+- **Libre Key Companion** (open source) — a companion application for
+  Android and iOS that manages hardware security keys and smart cards from
+  any manufacturer, including the OTP applet on Token2 devices.
+- **T2 TOTP Authenticator** — our mobile authenticator app that reads
+  TOTP profiles stored on the device over NFC, as a hardware-backed
+  drop-in replacement for phone-only authenticator apps.
+- **[token2-otp-cli](https://github.com/token2/token2-otp-cli)**
+  (open source) — the cross-platform Python CLI and GUI documented
+  throughout this README, and the tool this applet is cross-validated
+  against.
+
 ### Serial number over PC/SC (optional)
 
 The CLI reads the serial via the *FIDO* applet AID
