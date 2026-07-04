@@ -259,7 +259,7 @@ Interop notes observed from the CLI source:
 
 ## Behavioral notes & limitations
 
-- **No button.** The protocol itself anticipates this: over PC/SC "a touch
+- **No button on cards.** The protocol itself anticipates this: over PC/SC "a touch
   is implicit" (presenting the card to the reader *is* the user action), so
   `READ_ONE` always returns the code, including for button-required and
   HOTP entries. `READ_ALL` still masks those entries on the wire, exactly
