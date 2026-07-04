@@ -6,7 +6,7 @@ A Java Card applet implementing an on-device TOTP/HOTP store that speaks
 the open
 [Token2 OTP management protocol](https://github.com/token2/token2-otp-cli/blob/main/docs/Token2-OTP-SDK-Protocol.md),
 so it can be provisioned and read by the
-[token2-otp-cli](https://github.com/token2/token2-otp-cli) tool over any
+[token2-otp-cli](https://github.com/token2/token2-otp-cli) and similar tools over any
 PC/SC reader (USB contact reader or NFC reader).
 
 > ## ⚠️ TOTP IS **NOT** PHISHING RESISTANT
@@ -160,15 +160,14 @@ talks to it — all of the following speak the same on-device protocol:
   (proprietary) — our official applications, available on all platforms
   (Windows desktop, Android, and iOS), managing OTP alongside FIDO2 and PIV
   functionality of the same device.
-- **Token2 Companion – Rust edition (Keyroost)** (open source) — a
-  cross-platform desktop tool for Windows, macOS, and Linux built on the
-  independent open-source [keyroost](https://github.com/keyroost) Rust
-  toolchain, to which we contributed support for this OTP applet and the
-  Token2 PIN+ defaults.
+- **Keyroost** (open source) — a
+  cross-platform desktop tool for Windows, macOS, and Linux built on Rust
+  toolchain, to which we contributed support for this OTP applet, the
+  Token2 PIN+ defaults and many other features.
 - **Libre Key Companion** (open source) — a companion application for
   Android and iOS that manages hardware security keys and smart cards from
   any manufacturer, including the OTP applet on Token2 devices.
-- **T2 TOTP Authenticator** — our mobile authenticator app that reads
+- **T2 TOTP Authenticator** (open source)  — our desktop authenticator app that reads
   TOTP profiles stored on the device over NFC, as a hardware-backed
   drop-in replacement for phone-only authenticator apps.
 - **[token2-otp-cli](https://github.com/token2/token2-otp-cli)**
