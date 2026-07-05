@@ -16,6 +16,19 @@ PC/SC reader (USB contact reader or NFC reader).
 > phishing-resistant authentication. Use the OTP functionality for legacy
 > services only; wherever FIDO2 is available, use FIDO2.**
 
+
+> [!Note]
+> Important: This repository contains the source code for one of the applets available on our devices.
+> Not a complete list of all applets available on our devices. 
+> The following applets are currently open source:
+>
+> * **FIDO2:** https://github.com/token2/pin_plus_firmware
+> * **OTP:** https://github.com/token2/token2-otp-applet
+>
+> We are gradually working toward making the source code for all applets publicly available, with more repositories to be released over time.
+
+
+
 ## Target hardware
 
 This code runs on real Token2 hardware: FIDO2 security keys and cards built
