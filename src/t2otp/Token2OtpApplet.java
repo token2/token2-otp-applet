@@ -453,7 +453,12 @@ public class Token2OtpApplet extends Applet implements ExtendedLength {
             }
             case P2_PIN_FLAG: {
                 short n = pin.cmdReadFlag(respBuf);
-                send(apdu, respBuf, (short) 0, n);
+                /* Per the protocol the flag response length follows the
+                 * request Lc (04 -> status, 09 -> +PubVer/Crc, 29 -> +IV/EncRand
+                 * challenge), capped at what we produced. Honour the caller's Lc. */
+                short want = inLen;
+                if (want <= 0 || want > n) want = n;
+                send(apdu, respBuf, (short) 0, want);
                 break;
             }
             case P2_PIN_SET:
@@ -861,13 +866,76 @@ public class Token2OtpApplet extends Applet implements ExtendedLength {
         static final short SW_COND_NOT_SAT     = (short) 0x6985; // verify w/o PIN, or gated cmd
         static final short SW_SECURITY         = (short) 0x6982; // bad auth tag / wrong PIN
         static final short SW_PIN_LOCKED       = (short) 0x6983; // retry counter exhausted
-        static final short SW_WRONG_DATA       = (short) 0x6A80;
+        static final short SW_FUNC_NOT_SUP     = (short) 0x6A81; // Set when a PIN already exists
+        static final short SW_WRONG_DATA       = (short) 0x6A80; // PIN rejected by policy
 
         /* ---- PIN policy (shared with PIN+; not lowerable over APDU) ---- */
         static final byte  PIN_ALG_AES256      = (byte) 0x07;
         static final short MIN_NUMERIC_LEN     = 6;
         static final short MIN_ALNUM_LEN       = 10;
         static final byte  DEFAULT_MAX_RETRY   = (byte) 100;
+
+        /* Enforce the OTP-PIN complexity policy on the decrypted plaintext
+         * (layout: alg(1) retry(1) len(1) pin...) per the manual (V1.2):
+         * reject weak PINs with 6A80 rather than storing them. */
+        private void enforcePinPolicy(byte[] p, short ptLen) {
+            if (ptLen < 4) ISOException.throwIt(SW_WRONG_DATA);
+            short plen  = (short) (p[2] & 0xFF);
+            short pinOff = 3;
+            if ((short) (pinOff + plen) > ptLen) ISOException.throwIt(SW_WRONG_DATA);
+
+            boolean numeric = true;
+            for (short i = 0; i < plen; i++) {
+                byte c = p[(short) (pinOff + i)];
+                if (c < '0' || c > '9') { numeric = false; break; }
+            }
+
+            if (numeric) {
+                if (plen < MIN_NUMERIC_LEN) ISOException.throwIt(SW_WRONG_DATA);
+                // all-identical digits
+                boolean allSame = true;
+                for (short i = 1; i < plen; i++) {
+                    if (p[(short)(pinOff+i)] != p[pinOff]) { allSame = false; break; }
+                }
+                if (allSame) ISOException.throwIt(SW_WRONG_DATA);
+                // strictly ascending / descending consecutive sequence
+                boolean asc = true, desc = true;
+                for (short i = 1; i < plen; i++) {
+                    short d = (short) (p[(short)(pinOff+i)] - p[(short)(pinOff+i-1)]);
+                    if (d != 1)  asc  = false;
+                    if (d != -1) desc = false;
+                }
+                if (asc || desc) ISOException.throwIt(SW_WRONG_DATA);
+                // palindrome / mirror
+                boolean palin = true;
+                for (short i = 0; i < (short)(plen/2); i++) {
+                    if (p[(short)(pinOff+i)] != p[(short)(pinOff+plen-1-i)]) { palin = false; break; }
+                }
+                if (palin) ISOException.throwIt(SW_WRONG_DATA);
+                // no single digit appears more than 3 times
+                for (byte d = '0'; d <= '9'; d++) {
+                    short cnt = 0;
+                    for (short i = 0; i < plen; i++) {
+                        if (p[(short)(pinOff+i)] == d) cnt++;
+                    }
+                    if (cnt > 3) ISOException.throwIt(SW_WRONG_DATA);
+                }
+            } else {
+                if (plen < MIN_ALNUM_LEN) ISOException.throwIt(SW_WRONG_DATA);
+                // at least two of: upper, lower, digit, special
+                boolean up=false, lo=false, di=false, sp=false;
+                for (short i = 0; i < plen; i++) {
+                    byte c = p[(short)(pinOff+i)];
+                    if (c >= 'A' && c <= 'Z') up = true;
+                    else if (c >= 'a' && c <= 'z') lo = true;
+                    else if (c >= '0' && c <= '9') di = true;
+                    else sp = true;
+                }
+                short cats = 0;
+                if (up) cats++; if (lo) cats++; if (di) cats++; if (sp) cats++;
+                if (cats < 2) ISOException.throwIt(SW_WRONG_DATA);
+            }
+        }
 
         /* 5-minute verified window; the card has no clock, so it is driven off
          * the host UNIX timestamp supplied with each ENUM read (same source the
@@ -1056,8 +1124,13 @@ public class Token2OtpApplet extends Applet implements ExtendedLength {
 
         /* --- 1.13 Set OTP PIN: 80 C5 05 05, data = IV|NewPinEnc|NewPinAuth[16] --- */
         void cmdSetPin(byte[] in, short off, short len) {
-            if (pinSet) ISOException.throwIt(SW_COND_NOT_SAT);
+            // Set only works from the unprotected state. If a PIN already exists
+            // the device reports 6A81 (function not supported in this state).
+            if (pinSet) ISOException.throwIt(SW_FUNC_NOT_SUP);
             short ptLen = openPinBlob(in, off, len, /*hasOldHash*/ false);
+            // Enforce the OTP-PIN policy on the decrypted PIN; reject weak PINs
+            // with 6A80 per the manual (V1.2).
+            enforcePinPolicy(pt, ptLen);
             storeNewPin(ptLen);
         }
 
@@ -1066,7 +1139,11 @@ public class Token2OtpApplet extends Applet implements ExtendedLength {
             if (!pinSet) ISOException.throwIt(SW_COND_NOT_SAT);
             if (locked)  ISOException.throwIt(SW_PIN_LOCKED);
             short ptLen = openPinBlob(in, off, len, /*hasOldHash*/ true);
-            // openPinBlob verified the old-PIN hash already; store the new one
+            // openPinBlob verified the old-PIN hash already. A change to a
+            // zero-length PIN is a *remove* and skips the complexity policy;
+            // otherwise the new PIN must satisfy it.
+            short newLen = (short) (pt[2] & 0xFF);
+            if (newLen > 0) enforcePinPolicy(pt, ptLen);
             storeNewPin(ptLen);
         }
 
@@ -1205,6 +1282,20 @@ public class Token2OtpApplet extends Applet implements ExtendedLength {
             if (alg != PIN_ALG_AES256) ISOException.throwIt(SW_WRONG_DATA);
             if ((short) (pinOff + plen) > ptLen) ISOException.throwIt(SW_WRONG_DATA);
 
+            // A zero-length new PIN means REMOVE: clear all PIN state and return
+            // the device to the unprotected state (OtpPinLen == 0, AlgId == 0).
+            if (plen == 0) {
+                JCSystem.beginTransaction();
+                Util.arrayFillNonAtomic(pinHash, (short) 0, (short) 32, (byte) 0);
+                pinLen    = 0;
+                retryLeft = maxRetry;
+                locked    = false;
+                pinSet    = false;
+                windowState[0] = 0;   // close any open read window
+                JCSystem.commitTransaction();
+                return;
+            }
+
             boolean numeric = true;
             for (short i = 0; i < plen; i++) {
                 byte c = pt[(short) (pinOff + i)];
@@ -1225,8 +1316,6 @@ public class Token2OtpApplet extends Applet implements ExtendedLength {
             locked     = false;
             pinSet     = true;
             JCSystem.commitTransaction();
-
-            // deleting the PIN (OtpPinLen encoded as 0 handled by caller convention)
         }
 
         void deletePinIfRequested(byte[] in, short off, short len) {
