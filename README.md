@@ -83,6 +83,11 @@ the same cross-validation checks against the CLI as described below.
 | ENUM_CODES READ_ONE | `80 C5 05 00`, sub `01` | ✅ always includes the code |
 | ENUM_CODES GET_METADATA | `80 C5 05 00`, sub `02` | ✅ code only |
 | ENUM_CODES_CONTINUE | `80 C5 05 01` | ✅ |
+| READ_AGREEMENT_PUBKEY (PIN handshake) | `80 C5 05 09` | ✅ P-256 ECDH + ECC-P521 device signature |
+| READ_OTP_PIN_FLAG | `80 C5 05 04` | ✅ length follows request Lc (04/09/29) |
+| SET_OTP_PIN | `80 C5 05 05` | ✅ from unprotected state; `6A81` if already set |
+| VERIFY_OTP_PIN / LOCK | `80 C5 05 06` | ✅ opens/closes the read window |
+| CHANGE_OTP_PIN / remove | `80 C5 05 08` | ✅ change, or remove when new length = 0 |
 | READ_CONFIG | `80 C5 02 00` | ✅ reports NFC+CCID, TOTP supported, no button-HOTP |
 | ENABLE_TOTP | `80 C5 02 05` | ✅ stored flag |
 | SET_DEVICE_TYPE | `80 C5 02 01` | accepted as a no-op (a card has no USB composite interfaces to disable, so the protocol's bricking foot-gun doesn't exist here) |
@@ -112,8 +117,9 @@ may need the minor modifications mentioned above.
 
 ## Building
 
-A prebuilt `t2otp.cap` (target: Java Card 3.0.5) is included; it passed the
-Oracle off-card verifier with 0 errors. To rebuild:
+Build the CAP from source (there is no prebuilt CAP in the repo — build it
+yourself so the binary always matches the source you can read). Target:
+Java Card 3.0.5.
 
 ```bash
 # 1. Get a Java Card SDK bundle
@@ -132,7 +138,19 @@ JC_HOME=$PWD/sdks/jc320v26.0_kit sh sdks/jc320v26.0_kit/bin/converter.sh \
 ```
 
 Alternatively use [ant-javacard](https://github.com/martinpaljak/ant-javacard)
-with the included `build.xml` (drop `ant-javacard.jar` into `lib/`).
+with the included `build.xml` (drop `ant-javacard.jar` into `lib/`), which
+outputs `token2-otp.cap` in the project root.
+
+On Windows (PowerShell), the ant-javacard path is simplest:
+
+```powershell
+# JDK 8 + Ant (via winget), then in the repo root:
+git clone https://github.com/martinpaljak/oracle_javacard_sdks sdks
+New-Item -ItemType Directory -Force -Path lib | Out-Null
+Invoke-WebRequest "https://github.com/martinpaljak/ant-javacard/releases/latest/download/ant-javacard.jar" -OutFile lib\ant-javacard.jar
+$env:JAVA_HOME = (Get-ChildItem 'C:\Program Files\Eclipse Adoptium\jdk-8*').FullName
+ant                 # produces token2-otp.cap
+```
 
 ## Installing on the card
 
@@ -140,8 +158,8 @@ Use [GlobalPlatformPro](https://github.com/martinpaljak/GlobalPlatformPro)
 with your PC/SC reader:
 
 ```bash
-gp --install t2otp.cap
-gp --list       # should show applet F00000014F747001
+gp --install token2-otp.cap      # the CAP you built in the previous step
+gp --list                        # should show applet F00000014F747001
 ```
 
 This assumes the card still has default GlobalPlatform test keys
@@ -161,6 +179,52 @@ python3 app.py get_all
 python3 app.py read_entry --app-name "Test app" --account-name "alice"
 python3 app.py erase_all
 ```
+
+## OTP PIN (privacy protection)
+
+The applet implements the R3.4 optional-PIN flow (OTP-on-FIDO manual V1.2). When
+a PIN is set, code reads require an authenticated session and a successful
+verify. All PIN commands live under `80 C5 05 xx` and use short-form Lc.
+
+**Session.** `READ_AGREEMENT_PUBKEY` (`80 C5 05 09`) runs a P-256 ECDH handshake;
+the applet returns its agreement public key plus an ECC-P521 signature over
+`hostPub‖devPub`. Session keys are derived per the protocol (manual V1.2):
+
+```
+pu1PRKey      = HMAC-SHA256(key = 0x00*32,  data = ECDH_shared_X)
+SessionMacKey = HMAC-SHA256(key = pu1PRKey, data = "TOTP HMAC key" || 0x01)
+SessionEncKey = HMAC-SHA256(key = pu1PRKey, data = "TOTP AES key"  || 0x01)
+```
+
+**Commands.** `READ_OTP_PIN_FLAG` (`80 C5 05 04`) returns status; its length
+follows the request Lc (`04` status, `09` +PubVer/CRC, `29` +IV/EncRand verify
+challenge). `SET_OTP_PIN` (`80 C5 05 05`) sets a PIN from the unprotected state
+(`6A81` if one already exists). `VERIFY_OTP_PIN` (`80 C5 05 06`) opens the read
+window; the same opcode with `P3=01` locks it. `CHANGE_OTP_PIN` (`80 C5 05 08`)
+changes the PIN, or removes it when the new length is zero.
+
+**PIN policy** (enforced on-card per the manual's rules; violations return
+`6A80`):
+
+- *Numeric* (≥6 digits): no ascending/descending sequences (`123456`/`654321`),
+  no all-identical digits (`111111`), no palindromes (`321123`, `69233296`), no
+  digit repeated more than 3 times (`111123`, `990000`).
+- *Alphanumeric* (≥10 chars): at least two of {uppercase, lowercase, digits,
+  special characters}.
+
+**Try it with the CLI:**
+
+```bash
+python3 app.py set_pin --pin 3219918
+python3 app.py verify_pin --pin 3219918
+python3 app.py get_all --pin 3219918
+python3 app.py change_pin --old-pin 3219918 --new-pin 4820571
+python3 app.py remove_pin --pin 4820571
+python3 app.py pin_status
+```
+
+There is no PIN-only reset: `remove_pin` clears a PIN you know, and `erase_all`
+wipes all OTP data and PIN state (returning the card to `OtpPinLen == 0`).
 
 ## Host applications: other ways to use TOTP on these devices
 
@@ -230,9 +294,16 @@ code** from token2-otp-cli (`token2/ecdh_enc.py`, `token2/data_structures.py`,
   the CLI's `_extract_partial_flag`). Request offsets and the `GET_INFO`
   `D1 10 || 00×16` framing were checked against the CLI serializers.
 
-The CAP itself was built with the Oracle Java Card 3.2 converter targeting
-platform 3.0.5 and passes the Oracle off-card bytecode verifier with
-0 errors.
+- **OTP PIN**: the ECDH handshake and session-key derivation
+  (`pu1PRKey = HMAC(0×32, shared_X)`, `SessionMacKey`/`SessionEncKey` from the
+  `"TOTP HMAC key"`/`"TOTP AES key"` info strings), the `SET`/`VERIFY`/`CHANGE`
+  data layouts (IV + AES-256-CBC ciphertext + HMAC-SHA256 tag), and the PIN
+  complexity policy were cross-checked 1:1 against the CLI's `otp_pin.py`
+  implementation — both derive the same session keys and accept/reject the same
+  set of PINs.
+
+Build the CAP with the Oracle Java Card 3.2 converter targeting platform 3.0.5
+(see "Building"); the off-card bytecode verifier should report 0 errors.
 
 ## Reproducing on an NXP card — step by step
 
@@ -248,8 +319,8 @@ Tested build path (any Linux/macOS/Windows host with a PC/SC reader):
 gp --info
 #    -> shows JCOP version, free EEPROM, default ISD
 
-# 2. Load the applet (prebuilt CAP included in this repo)
-gp --install t2otp.cap
+# 2. Load the applet (the CAP you built from source — see "Building")
+gp --install token2-otp.cap
 gp --list
 #    -> APP: F00000014F747001 (SELECTABLE)
 
@@ -350,6 +421,5 @@ same cross-validation checks against the CLI.
 ```
 src/t2otp/Token2OtpApplet.java   the applet (single file)
 build.xml                        ant-javacard build
-cap/t2otp/javacard/t2otp.cap     prebuilt, verifier-clean CAP (JC 3.0.5 target)
 test/cross_check.py              validation against the CLI's own code + RFC vectors
 ```
