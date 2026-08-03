@@ -182,7 +182,8 @@ python3 app.py erase_all
 
 ## OTP PIN (privacy protection)
 
-The applet implements the R3.4 optional-PIN flow (OTP-on-FIDO manual V1.2). When
+The applet is updated to be included with keys running **firmware R3.4** or later 
+to introduce the optional-PIN flow (OTP-on-FIDO manual V1.2). When
 a PIN is set, code reads require an authenticated session and a successful
 verify. All PIN commands live under `80 C5 05 xx` and use short-form Lc.
 
